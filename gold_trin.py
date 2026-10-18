@@ -27,6 +27,8 @@ CLOSE_CUTOFF = time(16, 15)      # bars dated today are used only after this ET 
 MA_WINDOW = 5
 BOTTOM_LEVEL = 1.2
 TOP_LEVEL = 0.8
+BOTTOM_PCT = 0.90   # MA in its top 10% of the past year -> potential bottom
+TOP_PCT = 0.10      # MA in its bottom 10%               -> potential top
 MIN_COVERAGE = 0.70              # min share of basket with valid data on a day
 DISPLAY_DAYS = 126               # ~6 months shown
 DOWNLOAD_PERIOD = "1y"
@@ -122,11 +124,10 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, basket: list[str]) -> pd.Dat
     out.attrs["members"] = members
     out.attrs["missing"] = sorted(set(basket) - set(members))
 
-    state = np.where(out["ma"] >= BOTTOM_LEVEL, 1, np.where(out["ma"] <= TOP_LEVEL, -1, 0))
-    state = pd.Series(state, index=out.index).where(out["ma"].notna(), 0)
-    out["state"] = state
-    out["entry"] = (state != state.shift()) & (state != 0)
-    return out
+    hi = max(out["ma"].quantile(BOTTOM_PCT), 1.05)   # floors keep "bottom" above 1 and "top" below 1
+    lo = min(out["ma"].quantile(TOP_PCT), 0.95)
+    out.attrs["levels"] = {"bottom": round(float(hi), 2), "top": round(float(lo), 2)}
+    state = np.where(out["ma"] >= hi, 1, np.where(out["ma"] <= lo, -1, 0))
 
 
 # ----------------------------------------------------------------- OUTPUT
@@ -158,6 +159,7 @@ def build() -> None:
         panels.append({
             "name": p["name"],
             "members": len(df.attrs["members"]),
+            "levels": df.attrs["levels"],
             "last": {
                 "trin": None if pd.isna(last["trin"]) else round(float(last["trin"]), 2),
                 "ma": round(float(last["ma"]), 2),
