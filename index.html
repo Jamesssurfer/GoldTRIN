@@ -61,6 +61,7 @@ function card(p){
     <div class="cn"></div>
     <div class="row"><span>TRIN</span><b>${fmt(p.last.trin)}</b></div>
     <div class="row"><span>5d MA</span><b>${fmt(p.last.ma)}</b></div>
+    <div class="row"><span>Today's levels (top / bottom)</span><b>${fmt(p.levels.top)} / ${fmt(p.levels.bottom)}</b></div>
     <div class="row"><span>Adv / Dec</span><b>${p.last.adv} / ${p.last.dec}</b></div>
     <div class="row"><span>Basket size</span><b>${p.members}</b></div>
     <div class="badge" style="background:${color}">${label}</div>`;
@@ -69,10 +70,8 @@ function card(p){
 }
 
 function chart(p, params, host){
-  params = {...params, ...p.levels};
   const s = p.series;
-  const maxMa = Math.max(...s.ma.filter(v => v != null), 0);
-  const top = 2.5;
+  const top = 2.5;                       // raise this to see higher TRIN values
 
   const pick = sig => {
     const x = [], y = [];
@@ -80,8 +79,20 @@ function chart(p, params, host){
     return {x, y};
   };
   const bottoms = pick(1), tops = pick(-1);
+  const ceil = s.dates.map(() => top);
+  const floor = s.dates.map(() => 0);
+  const nowB = p.levels.bottom == null ? "" : ` (now ${fmt(p.levels.bottom)})`;
+  const nowT = p.levels.top == null ? "" : ` (now ${fmt(p.levels.top)})`;
 
   const traces = [
+    // Rolling zones. Each fill runs between the level line and the chart edge. Order matters: "tonexty" fills to the trace before it.
+    {x:s.dates, y:ceil, line:{width:0}, hoverinfo:"skip", showlegend:false},
+    {x:s.dates, y:s.hi, name:`Bottom level${nowB}`, connectgaps:false, fill:"tonexty",
+     fillcolor:"rgba(22,163,74,.08)", line:{color:COLORS.green, width:1, dash:"dash"}, hovertemplate:"%{y:.2f}"},
+    {x:s.dates, y:floor, line:{width:0}, hoverinfo:"skip", showlegend:false},
+    {x:s.dates, y:s.lo, name:`Top level${nowT}`, connectgaps:false, fill:"tonexty",
+     fillcolor:"rgba(220,38,38,.08)", line:{color:COLORS.red, width:1, dash:"dash"}, hovertemplate:"%{y:.2f}"},
+
     {x:s.dates, y:s.price, name:"Price (idx 100)", yaxis:"y2",
      line:{color:"#cbd5e1", width:1.5}, hovertemplate:"%{y:.1f}"},
     {x:s.dates, y:s.trin, name:"TRIN (daily)", mode:"markers",
@@ -94,32 +105,18 @@ function chart(p, params, host){
      marker:{symbol:"triangle-down", size:13, color:COLORS.red, line:{color:"#fff", width:1}}}
   ];
 
-  const band = (y0, y1, color) => ({type:"rect", xref:"paper", x0:0, x1:1, yref:"y",
-                                    y0, y1, fillcolor:color, opacity:.07, line:{width:0}, layer:"below"});
-  const hline = (y, color, dash, w) => ({type:"line", xref:"paper", x0:0, x1:1, yref:"y",
-                                         y0:y, y1:y, line:{color, width:w, dash}});
-
   const layout = {
-    height:400, margin:{l:50, r:50, t:55, b:30},
+    height:420, margin:{l:50, r:50, t:75, b:30},
     paper_bgcolor:"#fff", plot_bgcolor:"#fff", hovermode:"x unified",
     font:{family:"Inter, Segoe UI, sans-serif", size:12},
     title:{text:`<b>${p.name}</b>`, x:.01, font:{size:16}},
-    legend:{orientation:"h", y:1.13, x:1, xanchor:"right", font:{size:11}},
+    legend:{orientation:"h", y:1.16, x:1, xanchor:"right", font:{size:11}},
     xaxis:{type:"date", showgrid:false, rangebreaks:[{bounds:["sat","mon"]}]},
     yaxis:{title:"TRIN", range:[0, top], gridcolor:"#f1f5f9", zeroline:false},
     yaxis2:{title:"Price", overlaying:"y", side:"right", showgrid:false},
     shapes:[
-      band(params.bottom, top, COLORS.green),
-      band(0, params.top, COLORS.red),
-      hline(params.bottom, COLORS.green, "dash", 1),
-      hline(params.top, COLORS.red, "dash", 1),
-      hline(1, "#9ca3af", "dot", .7)
-    ],
-    annotations:[
-      {xref:"paper", x:0, xanchor:"left", yref:"y", y:params.bottom, yanchor:"bottom",
-       text:`${params.bottom} potential bottom`, showarrow:false, font:{size:10, color:COLORS.green}},
-      {xref:"paper", x:0, xanchor:"left", yref:"y", y:params.top, yanchor:"top",
-       text:`${params.top} potential top`, showarrow:false, font:{size:10, color:COLORS.red}}
+      {type:"line", xref:"paper", x0:0, x1:1, yref:"y", y0:1, y1:1,
+       line:{color:"#9ca3af", width:.7, dash:"dot"}}
     ]
   };
   Plotly.newPlot(host, traces, layout, {displayModeBar:false, responsive:true});
@@ -144,10 +141,12 @@ async function main(){
       chart(p, d.params, host);
     });
 
-      document.getElementById("note").innerHTML =
+    document.getElementById("note").innerHTML =
       `TRIN = (Advancers / Decliners) &divide; (Advancing Volume / Declining Volume), computed from constituent baskets using relative volume. ` +
-      `A potential bottom fires when the ${d.params.ma}-day MA enters the top 10% of its own past-year range, and a potential top when it enters the bottom 10%. ` +
-      `The exact levels for each basket are drawn on its chart. Only completed US sessions are used.`;
+      `Each day's ${d.params.ma}-day MA is ranked against that basket's own previous ${d.params.lookback} sessions: ` +
+      `a potential bottom fires when it enters the top 10% of that range, a potential top when it enters the bottom 10%. ` +
+      `The level lines are recalculated daily from earlier sessions only, so historical signals use only what was known at the time. ` +
+      `Triangles mark the first day a zone is entered. Only completed US sessions are used.`;
 
     const warn = document.getElementById("warn");
     d.warnings.forEach(w => { const li = document.createElement("li"); li.textContent = w; warn.appendChild(li); });
