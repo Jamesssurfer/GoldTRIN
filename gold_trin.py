@@ -32,17 +32,49 @@ DISPLAY_DAYS = 126               # ~6 months shown
 DOWNLOAD_PERIOD = "1y"
 OUTPUT = Path("docs/data.json")
 
-# US-listed tickers only (avoids cross-listing volume distortion). EDIT THESE.
-CORE = ["NEM", "AEM", "B", "WPM", "FNV", "GFI", "AU", "KGC", "AGI", "HMY",
-        "EGO", "BTG", "IAG", "OR", "PAAS", "HL", "CDE", "EQX", "NGD", "SSRM"]
-JUNIORS = ["DRD", "ORLA", "CGAU", "SA", "AUGO", "GORO", "TFPM"]
+# Yahoo tickers. International listings allowed. Edit freely.
+# GDX: from GDX_asof_20261016.xlsx (59 equities). GDX tracks the GDM index.
+GDX_BASKET = [
+    "NEM", "AEM", "B", "WPM", "FNV", "AU", "GFI", "KGC", "NST.AX", "PAAS", "RGLD", "CDE",
+    "AGI", "EQX", "EVN.AX", "PE&OLES.MX", "EDV.L", "IAG", "2259.HK", "HL", "AG", "LUG.TO",
+    "FRES.L", "DPM.TO", "BTG", "GMIN.TO", "OGC.TO", "HMY", "BVN", "EGO", "SSRM", "DSV.TO",
+    "PRU.AX", "OR", "RMS.AX", "AMMN.JK", "ARTG.V", "1818.HK", "KNT.TO", "MAU.TO", "TXG.TO",
+    "CMM.AX", "AUGO", "CGAU", "GMD.AX", "ARIS", "VAU.AX", "AYA.TO", "WDO.TO", "SKE",
+    "GGP.AX", "FSM", "RRL.AX", "BRMS.JK", "HOC.L", "WGX.AX", "EXK", "SA", "SVM",
+]
+
+# Fidelity Select Gold: from fidelitygoldholdings.pdf (31 Aug 2026), TSX tickers as listed there.
+FIDELITY_BASKET = [
+    "NEM", "CDE", "AEM.TO", "WPM.TO", "B.TO", "FNV.TO", "ELD.TO", "DPM.TO", "GMIN.TO", "IMG.TO",
+    "MAU.TO", "EQX.TO", "SKE.TO", "AYA.TO", "SSRM.TO", "KNT.TO", "CG.TO", "K.TO", "FM.TO",
+    "WGX.AX", "OGC.TO", "MAI.TO", "WDO.TO", "NG.TO", "HMMC.TO", "FDY.TO", "ARTG.V", "TALA.TO",
+    "HBM.TO", "RIO.TO", "AU", "2259.HK", "2899.HK", "GFI",
+]
+
+# Your GDM CSV with 11 non-gold rows removed and 8 unmappable names skipped.
+GDM_SCREEN = [
+    "PAAS", "HOC.L", "KCN.AX", "KGC", "HMY", "GFI", "WPM", "NEM", "FRES.L", "2899.HK", "B", "AEM",
+    "RMS.AX", "DRD", "VAU.AX", "FSM", "CDE", "AU", "EXK", "SVM", "EGO", "HL", "FNV", "IAG", "MUX",
+    "DPM.TO", "LUG.TO", "ORE.TO", "SA", "BVN", "AG", "DSV.TO", "RRL.AX", "NG", "THM", "GAU",
+    "NST.AX", "AGI", "GGD.TO", "WDO.TO", "PAN.JO", "USAS", "OGC.TO", "1818.HK", "CYL.AX", "WAF.AX",
+    "BTG", "OBM.AX", "KNT.TO", "OR", "3330.HK", "3939.HK", "WGX.AX", "NEWP", "0340.HK", "1787.HK",
+    "MTA", "EQX", "GMIN.TO", "SGD.V", "MAU.TO", "BNZ.AX", "GROY", "CGAU", "NFG", "SKE", "GMD.AX",
+    "VZLA", "DC", "IAUX", "TFPM", "HMMC.TO", "TALA.TO", "6693.HK", "AAUC", "2259.HK", "ARIS",
+]
+
+# Your GICS file with outdated tickers corrected and acquired names dropped. An approximation.
+GICS_BASKET = [
+    "NEM", "AEM", "B", "WPM", "FNV", "AU", "GFI", "KGC", "RGLD", "AGI", "PAAS", "LUG.TO", "EQX",
+    "IAG", "NG", "EGO", "OR", "BTG", "SA", "HMY", "GROY", "GLDG", "MUX", "CDE", "DRD", "THM",
+    "TRX", "VGZ", "AMX.V",
+]
 
 PANELS = [
-    # name,                                   basket,          price ticker (None = equal-weight basket index)
-    {"name": "NYSE Arca Gold Miners (GDM)",   "basket": CORE,            "price": None},
-    {"name": "VanEck Gold Miners ETF (GDX)",  "basket": CORE,            "price": "GDX"},
-    {"name": "Fidelity Select Gold (FSAGX)",  "basket": CORE[:16],       "price": "FSAGX"},
-    {"name": "GICS Gold (15104030) universe", "basket": CORE + JUNIORS,  "price": None},
+    # To make panel 1 the index basket instead of the wider screen, use GDX_BASKET.
+    {"name": "Global Gold Miners screen (GDM CSV)", "basket": GDM_SCREEN,      "price": None},
+    {"name": "VanEck Gold Miners ETF (GDX)",        "basket": GDX_BASKET,      "price": "GDX"},
+    {"name": "Fidelity Select Gold (FSAGX)",        "basket": FIDELITY_BASKET, "price": "FSAGX"},
+    {"name": "GICS Gold (15104030) approx.",        "basket": GICS_BASKET,     "price": None},
 ]
 
 
@@ -71,7 +103,8 @@ def download(tickers: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
 def compute(close: pd.DataFrame, vol: pd.DataFrame, basket: list[str]) -> pd.DataFrame:
     members = [t for t in basket if t in close.columns and close[t].notna().sum() > 20]
     c, v = close[members], vol[members]
-    valid = c.notna() & c.shift().notna()
+    v = v / v.rolling(20, min_periods=10).mean().shift(1)   # relative volume: unit-free across exchanges
+    valid = c.notna() & c.shift().notna() & v.notna()
     chg = c.diff()
     up, dn = (chg > 0) & valid, (chg < 0) & valid
 
