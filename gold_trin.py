@@ -77,10 +77,10 @@ GICS_BASKET = [
 
 PANELS = [
     # To make panel 1 the index basket instead of the wider screen, use GDX_BASKET.
-    {"name": "Global Gold Miners screen (GDM CSV)", "basket": GDM_SCREEN,      "price": None},
+    {"name": "Global Gold Miners (GDM)", "basket": GDM_SCREEN,      "price": None},
     {"name": "VanEck Gold Miners ETF (GDX)",        "basket": GDX_BASKET,      "price": "GDX"},
     {"name": "Fidelity Select Gold (FSAGX)",        "basket": FIDELITY_BASKET, "price": "FSAGX"},
-    {"name": "GICS Gold (15104030) approx.",        "basket": GICS_BASKET,     "price": None},
+    {"name": "GICS Gold (15104030) ",        "basket": GICS_BASKET,     "price": None},
 ]
 
 
