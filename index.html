@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gold Equitiy's TRIN</title>
+<title>GoldTRIN</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   :root{
@@ -14,8 +14,12 @@
   body{margin:0;background:var(--bg);color:var(--ink);
        font-family:Inter,"Segoe UI",system-ui,sans-serif}
   .wrap{max-width:1200px;margin:0 auto;padding:28px 20px 40px}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
   header h1{margin:0;font-size:26px;letter-spacing:-.01em}
   header .sub{color:var(--muted);font-size:13px;margin:4px 0 22px}
+  .ctl{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .ctl select{font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);
+              border-radius:8px;padding:6px 10px;cursor:pointer}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-bottom:22px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
   .card .cn{font-weight:600;font-size:13px;margin-bottom:10px}
@@ -34,8 +38,20 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Gold Equity's Trin</h1>
-    <div class="sub" id="sub">Loading…</div>
+    <div class="head">
+      <div>
+        <h1>GoldTRIN</h1>
+        <div class="sub" id="sub">Loading…</div>
+      </div>
+      <label class="ctl">Timeframe
+        <select id="range">
+          <option value="1M">1 month</option>
+          <option value="3M">3 months</option>
+          <option value="6M">6 months</option>
+          <option value="1Y" selected>12 months</option>
+        </select>
+      </label>
+    </div>
   </header>
   <section class="cards" id="cards"></section>
   <section id="charts"></section>
@@ -45,6 +61,8 @@
 
 <script>
 const COLORS = {green:"#16a34a", red:"#dc2626", amber:"#b45309", slate:"#64748b"};
+const RANGES = {"1M":30, "3M":91, "6M":182, "1Y":null};   // calendar days shown; null = everything in data.json
+const DOT    = {"1M":8, "3M":6, "6M":5, "1Y":4};          // daily-TRIN dot size grows as you zoom in
 const fmt = v => v == null ? "–" : v.toFixed(2);
 
 function status(state){
@@ -69,8 +87,28 @@ function card(p){
   return el;
 }
 
-function chart(p, params, host){
-  const s = p.series;
+// Cut the series to the chosen timeframe and re-base price to 100 on the first visible day.
+function windowed(s, days){
+  const n = s.dates.length;
+  let start = 0;
+  if (days != null){
+    const last = new Date(s.dates[n - 1] + "T00:00:00Z").getTime();
+    const cutoff = last - days * 86400000;
+    start = s.dates.findIndex(d => new Date(d + "T00:00:00Z").getTime() >= cutoff);
+    if (start < 0) start = 0;
+  }
+  const cut = a => a.slice(start);
+  const price = cut(s.price);
+  const base = price.find(v => v != null);
+  return {
+    dates: cut(s.dates), trin: cut(s.trin), ma: cut(s.ma), hi: cut(s.hi), lo: cut(s.lo),
+    signal: cut(s.signal),
+    price: base ? price.map(v => v == null ? null : v / base * 100) : price
+  };
+}
+
+function chart(p, params, host, key){
+  const s = windowed(p.series, RANGES[key]);
   const top = 2.5;                       // raise this to see higher TRIN values
 
   const pick = sig => {
@@ -96,7 +134,7 @@ function chart(p, params, host){
     {x:s.dates, y:s.price, name:"Price (idx 100)", yaxis:"y2",
      line:{color:"#cbd5e1", width:1.5}, hovertemplate:"%{y:.1f}"},
     {x:s.dates, y:s.trin, name:"TRIN (daily)", mode:"markers",
-     marker:{color:"#94a3b8", size:4, opacity:.55}, hovertemplate:"%{y:.2f}"},
+     marker:{color:"#94a3b8", size:DOT[key], opacity:.6}, hovertemplate:"%{y:.2f}"},
     {x:s.dates, y:s.ma, name:`TRIN ${params.ma}d MA`, connectgaps:false,
      line:{color:COLORS.amber, width:3}, hovertemplate:"%{y:.2f}"},
     {x:bottoms.x, y:bottoms.y, mode:"markers", name:"Potential bottom", hoverinfo:"skip",
@@ -132,21 +170,27 @@ async function main(){
     sub.textContent = `Arms Index (TRIN) breadth for gold miners · data through close of ${d.asof} · generated ${d.updated}`;
     const cards = document.getElementById("cards");
     const charts = document.getElementById("charts");
+    const select = document.getElementById("range");
 
+    const panels = [];
     d.panels.forEach(p => {
       cards.appendChild(card(p));
       const host = document.createElement("div");
       host.className = "chart";
       charts.appendChild(host);
-      chart(p, d.params, host);
+      panels.push({p, host});
     });
+    const draw = () => panels.forEach(x => chart(x.p, d.params, x.host, select.value));
+    select.addEventListener("change", draw);
+    draw();
 
     document.getElementById("note").innerHTML =
       `TRIN = (Advancers / Decliners) &divide; (Advancing Volume / Declining Volume), computed from constituent baskets using relative volume. ` +
       `Each day's ${d.params.ma}-day MA is ranked against that basket's own previous ${d.params.lookback} sessions: ` +
       `a potential bottom fires when it enters the top 10% of that range, a potential top when it enters the bottom 10%. ` +
       `The level lines are recalculated daily from earlier sessions only, so historical signals use only what was known at the time. ` +
-      `Triangles mark the first day a zone is entered. Only completed US sessions are used.`;
+      `Triangles mark the first day a zone is entered. Only completed US sessions are used. ` +
+      `The timeframe menu only zooms the view: price re-bases to 100 on the first visible day, while the cards, levels and signals do not change.`;
 
     const warn = document.getElementById("warn");
     d.warnings.forEach(w => { const li = document.createElement("li"); li.textContent = w; warn.appendChild(li); });
