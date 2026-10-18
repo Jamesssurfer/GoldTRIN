@@ -4,9 +4,12 @@ GoldTRIN - Arms Index (TRIN) breadth data builder for gold miners.
 
 TRIN = (Advancers / Decliners) / (Advancing Volume / Declining Volume)
 Volume is relative volume (today / prior 20-day average) so mixed exchanges are comparable.
-Signals use the 5-day MA of TRIN against levels taken from each basket's own past year:
-    MA in its top 10%    -> potential bottom
-    MA in its bottom 10% -> potential top
+
+Signals use the 5-day MA of TRIN ranked against that basket's OWN trailing year, COT-index style:
+    MA in the top 10% of the previous 252 sessions    -> potential bottom
+    MA in the bottom 10% of the previous 252 sessions -> potential top
+The levels are recalculated every day from sessions BEFORE that day, so every historical
+signal uses only information that existed at the time (no look-ahead).
 
 Output: docs/data.json  (rendered by index.html)
 """
@@ -26,13 +29,13 @@ NY = ZoneInfo("America/New_York")
 SG = ZoneInfo("Asia/Singapore")
 CLOSE_CUTOFF = time(16, 15)      # bars dated today are used only after this ET time
 MA_WINDOW = 5
-BOTTOM_LEVEL = 1.2               # fallback values written to data.json (chart uses per-basket levels)
-TOP_LEVEL = 0.8
-BOTTOM_PCT = 0.90                # MA in its top 10% of the past year -> potential bottom
-TOP_PCT = 0.10                   # MA in its bottom 10%               -> potential top
+BOTTOM_PCT = 0.90                # MA in its top 10% of the trailing window    -> potential bottom
+TOP_PCT = 0.10                   # MA in its bottom 10% of the trailing window -> potential top
+LOOKBACK = 252                   # sessions used to rank each day (about 1 year)
+LOOKBACK_MIN = 200               # a day gets levels only if at least this many MA values precede it
 MIN_COVERAGE = 0.70              # min share of basket with valid data on a day
-DISPLAY_DAYS = 126               # ~6 months shown
-DOWNLOAD_PERIOD = "1y"
+DISPLAY_DAYS = 252               # sessions shown on the charts (about 12 months)
+DOWNLOAD_DAYS = 820              # calendar days downloaded: display + lookback + warm-up
 OUTPUT = Path("docs/data.json")
 
 # Yahoo tickers. International listings allowed. Edit freely.
@@ -46,9 +49,9 @@ GDX_BASKET = [
     "GGP.AX", "FSM", "RRL.AX", "BRMS.JK", "HOC.L", "WGX.AX", "EXK", "SA", "SVM",
 ]
 
-# Fidelity Select Gold: from fidelitygoldholdings.pdf (31 Aug 2026), TSX tickers as listed there.
+# Fidelity Select Gold: from fidelitygoldholdings.pdf (31 Aug 2026). Barrick uses the US listing "B".
 FIDELITY_BASKET = [
-    "NEM", "CDE", "AEM.TO", "WPM.TO", "B.TO", "FNV.TO", "ELD.TO", "DPM.TO", "GMIN.TO", "IMG.TO",
+    "NEM", "CDE", "AEM.TO", "WPM.TO", "B", "FNV.TO", "ELD.TO", "DPM.TO", "GMIN.TO", "IMG.TO",
     "MAU.TO", "EQX.TO", "SKE.TO", "AYA.TO", "SSRM.TO", "KNT.TO", "CG.TO", "K.TO", "FM.TO",
     "WGX.AX", "OGC.TO", "MAI.TO", "WDO.TO", "NG.TO", "HMMC.TO", "FDY.TO", "ARTG.V", "TALA.TO",
     "HBM.TO", "RIO.TO", "AU", "2259.HK", "2899.HK", "GFI",
@@ -93,7 +96,8 @@ def last_completed_session_date() -> pd.Timestamp:
 
 # ------------------------------------------------------------------ DATA
 def download(tickers: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    raw = yf.download(sorted(set(tickers)), period=DOWNLOAD_PERIOD, interval="1d",
+    start = (datetime.now(NY) - timedelta(days=DOWNLOAD_DAYS)).strftime("%Y-%m-%d")
+    raw = yf.download(sorted(set(tickers)), start=start, interval="1d",
                       auto_adjust=False, progress=False, threads=True)
     close, vol = raw["Close"].copy(), raw["Volume"].copy()
     close.index = pd.to_datetime(close.index).tz_localize(None)
@@ -125,10 +129,12 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, basket: list[str]) -> pd.Dat
     out.attrs["members"] = members
     out.attrs["missing"] = sorted(set(basket) - set(members))
 
-    hi = max(out["ma"].quantile(BOTTOM_PCT), 1.05)   # floors keep "bottom" above 1 and "top" below 1
-    lo = min(out["ma"].quantile(TOP_PCT), 0.95)
-    out.attrs["levels"] = {"bottom": round(float(hi), 2), "top": round(float(lo), 2)}
-    state = np.where(out["ma"] >= hi, 1, np.where(out["ma"] <= lo, -1, 0))
+    # Rolling levels: each day is ranked against the sessions BEFORE it (shift 1) -> no look-ahead.
+    roll = out["ma"].rolling(LOOKBACK, min_periods=LOOKBACK_MIN)
+    out["hi"] = roll.quantile(BOTTOM_PCT).shift(1).clip(lower=1.05)   # floors keep "bottom" above 1
+    out["lo"] = roll.quantile(TOP_PCT).shift(1).clip(upper=0.95)      # and "top" below 1
+
+    state = np.where(out["ma"] >= out["hi"], 1, np.where(out["ma"] <= out["lo"], -1, 0))
     state = pd.Series(state, index=out.index).where(out["ma"].notna(), 0)
     out["state"] = state
     out["entry"] = (state != state.shift()) & (state != 0)
@@ -138,6 +144,10 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, basket: list[str]) -> pd.Dat
 # ----------------------------------------------------------------- OUTPUT
 def to_list(s: pd.Series, nd: int = 4) -> list:
     return [None if pd.isna(x) else round(float(x), nd) for x in s]
+
+
+def num(x, nd: int = 2):
+    return None if pd.isna(x) else round(float(x), nd)
 
 
 def build() -> None:
@@ -150,6 +160,9 @@ def build() -> None:
         df = compute(close, vol, p["basket"])
         if df["ma"].dropna().empty:
             warnings.append(f"{p['name']}: not enough data")
+            continue
+        if df["hi"].dropna().empty:
+            warnings.append(f"{p['name']}: not enough history to rank against a trailing year")
             continue
         if df.attrs["missing"]:
             warnings.append(f"{p['name']}: no data for {', '.join(df.attrs['missing'])}")
@@ -164,10 +177,10 @@ def build() -> None:
         panels.append({
             "name": p["name"],
             "members": len(df.attrs["members"]),
-            "levels": df.attrs["levels"],
+            "levels": {"bottom": num(last["hi"]), "top": num(last["lo"])},
             "last": {
-                "trin": None if pd.isna(last["trin"]) else round(float(last["trin"]), 2),
-                "ma": None if pd.isna(last["ma"]) else round(float(last["ma"]), 2),
+                "trin": num(last["trin"]),
+                "ma": num(last["ma"]),
                 "adv": int(last["adv"]),
                 "dec": int(last["dec"]),
                 "state": int(last["state"]),
@@ -176,6 +189,8 @@ def build() -> None:
                 "dates": [d.strftime("%Y-%m-%d") for d in df.index],
                 "trin": to_list(df["trin"]),
                 "ma": to_list(df["ma"]),
+                "hi": to_list(df["hi"], 3),
+                "lo": to_list(df["lo"], 3),
                 "price": to_list(price, 2),
                 "signal": [int(s) if e else 0 for s, e in zip(df["state"], df["entry"])],
             },
@@ -184,7 +199,7 @@ def build() -> None:
     payload = {
         "asof": asof.strftime("%a %d %b %Y"),
         "updated": datetime.now(SG).strftime("%Y-%m-%d %H:%M SGT"),
-        "params": {"ma": MA_WINDOW, "bottom": BOTTOM_LEVEL, "top": TOP_LEVEL},
+        "params": {"ma": MA_WINDOW, "lookback": LOOKBACK, "bottom_pct": BOTTOM_PCT, "top_pct": TOP_PCT},
         "warnings": warnings,
         "panels": panels,
     }
