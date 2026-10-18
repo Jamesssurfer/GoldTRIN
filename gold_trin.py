@@ -84,7 +84,7 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, basket: list[str]) -> pd.Dat
     trin[(valid.sum(axis=1) / max(len(members), 1)) < MIN_COVERAGE] = np.nan
 
     out = pd.DataFrame({"adv": adv, "dec": dec, "trin": trin})
-    out["ma"] = out["trin"].rolling(MA_WINDOW, min_periods=MA_WINDOW).mean()
+    out["ma"] = out["trin"].clip(upper=3.0).rolling(MA_WINDOW, min_periods=3).mean()
     out["composite"] = (1 + c.pct_change(fill_method=None).mean(axis=1)).cumprod()
     out.attrs["members"] = members
     out.attrs["missing"] = sorted(set(basket) - set(members))
