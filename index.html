@@ -69,6 +69,7 @@ function card(p){
 }
 
 function chart(p, params, host){
+  params = {...params, ...p.levels};
   const s = p.series;
   const maxMa = Math.max(...s.ma.filter(v => v != null), 0);
   const top = 2.5;
@@ -143,10 +144,10 @@ async function main(){
       chart(p, d.params, host);
     });
 
-    document.getElementById("note").innerHTML =
-      `TRIN = (Advancers / Decliners) &divide; (Advancing Volume / Declining Volume), computed from constituent baskets. ` +
-      `Signals use the ${d.params.ma}-day MA of TRIN: &ge;${d.params.bottom} potential bottom (green), ` +
-      `&le;${d.params.top} potential top (red). Triangles mark the first day a zone is entered. Only completed US sessions are used.`;
+      document.getElementById("note").innerHTML =
+      `TRIN = (Advancers / Decliners) &divide; (Advancing Volume / Declining Volume), computed from constituent baskets using relative volume. ` +
+      `A potential bottom fires when the ${d.params.ma}-day MA enters the top 10% of its own past-year range, and a potential top when it enters the bottom 10%. ` +
+      `The exact levels for each basket are drawn on its chart. Only completed US sessions are used.`;
 
     const warn = document.getElementById("warn");
     d.warnings.forEach(w => { const li = document.createElement("li"); li.textContent = w; warn.appendChild(li); });
