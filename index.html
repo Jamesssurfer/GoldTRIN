@@ -1,1 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GoldTRIN</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root{
+    --bg:#f8fafc; --panel:#fff; --line:#e2e8f0; --ink:#0f172a; --muted:#64748b;
+    --green:#16a34a; --red:#dc2626; --amber:#b45309; --slate:#64748b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:Inter,"Segoe UI",system-ui,sans-serif}
+  .wrap{max-width:1200px;margin:0 auto;padding:28px 20px 40px}
+  header h1{margin:0;font-size:26px;letter-spacing:-.01em}
+  header .sub{color:var(--muted);font-size:13px;margin:4px 0 22px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card .cn{font-weight:600;font-size:13px;margin-bottom:10px}
+  .row{display:flex;justify-content:space-between;font-size:13px;color:#475569;padding:2px 0}
+  .row b{color:var(--ink);font-variant-numeric:tabular-nums}
+  .badge{margin-top:12px;color:#fff;font-size:11px;font-weight:700;letter-spacing:.06em;
+         text-align:center;border-radius:6px;padding:6px}
+  .chart{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+         padding:8px;margin-bottom:18px;min-height:400px}
+  .note{color:var(--muted);font-size:12px;line-height:1.6;margin-top:10px}
+  .warn{color:var(--amber);font-size:12px;margin:10px 0 0;padding-left:18px}
+  .error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:8px;
+         padding:14px;font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>GoldTRIN</h1>
+    <div class="sub" id="sub">Loading…</div>
+  </header>
+  <section class="cards" id="cards"></section>
+  <section id="charts"></section>
+  <div class="note" id="note"></div>
+  <ul class="warn" id="warn"></ul>
+</div>
 
+<script>
+const COLORS = {green:"#16a34a", red:"#dc2626", amber:"#b45309", slate:"#64748b"};
+const fmt = v => v == null ? "–" : v.toFixed(2);
+
+function status(state){
+  if (state === 1)  return ["POTENTIAL BOTTOM", COLORS.green];
+  if (state === -1) return ["POTENTIAL TOP",    COLORS.red];
+  return ["NEUTRAL", COLORS.slate];
+}
+
+function card(p){
+  const [label, color] = status(p.last.state);
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML = `
+    <div class="cn"></div>
+    <div class="row"><span>TRIN</span><b>${fmt(p.last.trin)}</b></div>
+    <div class="row"><span>5d MA</span><b>${fmt(p.last.ma)}</b></div>
+    <div class="row"><span>Adv / Dec</span><b>${p.last.adv} / ${p.last.dec}</b></div>
+    <div class="row"><span>Basket size</span><b>${p.members}</b></div>
+    <div class="badge" style="background:${color}">${label}</div>`;
+  el.querySelector(".cn").textContent = p.name;
+  return el;
+}
+
+function chart(p, params, host){
+  const s = p.series;
+  const maxMa = Math.max(...s.ma.filter(v => v != null), 0);
+  const top = Math.max(2, maxMa * 1.2);
+
+  const pick = sig => {
+    const x = [], y = [];
+    s.signal.forEach((v, i) => { if (v === sig){ x.push(s.dates[i]); y.push(s.ma[i]); } });
+    return {x, y};
+  };
+  const bottoms = pick(1), tops = pick(-1);
+
+  const traces = [
+    {x:s.dates, y:s.price, name:"Price (idx 100)", yaxis:"y2",
+     line:{color:"#cbd5e1", width:1.5}, hovertemplate:"%{y:.1f}"},
+    {x:s.dates, y:s.trin, name:"TRIN (daily)",
+     line:{color:"#94a3b8", width:1}, hovertemplate:"%{y:.2f}"},
+    {x:s.dates, y:s.ma, name:`TRIN ${params.ma}d MA`,
+     line:{color:COLORS.amber, width:2.5}, hovertemplate:"%{y:.2f}"},
+    {x:bottoms.x, y:bottoms.y, mode:"markers", name:"Potential bottom", hoverinfo:"skip",
+     marker:{symbol:"triangle-up", size:13, color:COLORS.green, line:{color:"#fff", width:1}}},
+    {x:tops.x, y:tops.y, mode:"markers", name:"Potential top", hoverinfo:"skip",
+     marker:{symbol:"triangle-down", size:13, color:COLORS.red, line:{color:"#fff", width:1}}}
+  ];
+
+  const band = (y0, y1, color) => ({type:"rect", xref:"paper", x0:0, x1:1, yref:"y",
+                                    y0, y1, fillcolor:color, opacity:.07, line:{width:0}, layer:"below"});
+  const hline = (y, color, dash, w) => ({type:"line", xref:"paper", x0:0, x1:1, yref:"y",
+                                         y0:y, y1:y, line:{color, width:w, dash}});
+
+  const layout = {
+    height:400, margin:{l:50, r:50, t:55, b:30},
+    paper_bgcolor:"#fff", plot_bgcolor:"#fff", hovermode:"x unified",
+    font:{family:"Inter, Segoe UI, sans-serif", size:12},
+    title:{text:`<b>${p.name}</b>`, x:.01, font:{size:16}},
+    legend:{orientation:"h", y:1.13, x:1, xanchor:"right", font:{size:11}},
+    xaxis:{type:"date", showgrid:false, rangebreaks:[{bounds:["sat","mon"]}]},
+    yaxis:{title:"TRIN", range:[0, top], gridcolor:"#f1f5f9", zeroline:false},
+    yaxis2:{title:"Price", overlaying:"y", side:"right", showgrid:false},
+    shapes:[
+      band(params.bottom, top, COLORS.green),
+      band(0, params.top, COLORS.red),
+      hline(params.bottom, COLORS.green, "dash", 1),
+      hline(params.top, COLORS.red, "dash", 1),
+      hline(1, "#9ca3af", "dot", .7)
+    ],
+    annotations:[
+      {xref:"paper", x:0, xanchor:"left", yref:"y", y:params.bottom, yanchor:"bottom",
+       text:`${params.bottom} potential bottom`, showarrow:false, font:{size:10, color:COLORS.green}},
+      {xref:"paper", x:0, xanchor:"left", yref:"y", y:params.top, yanchor:"top",
+       text:`${params.top} potential top`, showarrow:false, font:{size:10, color:COLORS.red}}
+    ]
+  };
+  Plotly.newPlot(host, traces, layout, {displayModeBar:false, responsive:true});
+}
+
+async function main(){
+  const sub = document.getElementById("sub");
+  try{
+    const res = await fetch("data.json?t=" + Date.now(), {cache:"no-store"});
+    if (!res.ok) throw new Error(`data.json returned HTTP ${res.status}`);
+    const d = await res.json();
+
+    sub.textContent = `Arms Index (TRIN) breadth for gold miners · data through close of ${d.asof} · generated ${d.updated}`;
+    const cards = document.getElementById("cards");
+    const charts = document.getElementById("charts");
+
+    d.panels.forEach(p => {
+      cards.appendChild(card(p));
+      const host = document.createElement("div");
+      host.className = "chart";
+      charts.appendChild(host);
+      chart(p, d.params, host);
+    });
+
+    document.getElementById("note").innerHTML =
+      `TRIN = (Advancers / Decliners) &divide; (Advancing Volume / Declining Volume), computed from constituent baskets. ` +
+      `Signals use the ${d.params.ma}-day MA of TRIN: &ge;${d.params.bottom} potential bottom (green), ` +
+      `&le;${d.params.top} potential top (red). Triangles mark the first day a zone is entered. Only completed US sessions are used.`;
+
+    const warn = document.getElementById("warn");
+    d.warnings.forEach(w => { const li = document.createElement("li"); li.textContent = w; warn.appendChild(li); });
+  } catch(e){
+    sub.innerHTML = `<div class="error">Could not load <code>data.json</code>: ${e.message}.
+      Open this page through GitHub Pages or a local server, not by double-clicking the file.</div>`;
+  }
+}
+main();
+</script>
+</body>
+</html>
