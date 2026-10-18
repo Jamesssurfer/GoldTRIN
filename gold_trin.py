@@ -3,11 +3,12 @@
 GoldTRIN - Arms Index (TRIN) breadth data builder for gold miners.
 
 TRIN = (Advancers / Decliners) / (Advancing Volume / Declining Volume)
-Signal rule (on the 5-day MA of TRIN):
-    MA >= 1.2  -> potential bottom
-    MA <= 0.8  -> potential top
+Volume is relative volume (today / prior 20-day average) so mixed exchanges are comparable.
+Signals use the 5-day MA of TRIN against levels taken from each basket's own past year:
+    MA in its top 10%    -> potential bottom
+    MA in its bottom 10% -> potential top
 
-Output: docs/data.json  (rendered by docs/index.html)
+Output: docs/data.json  (rendered by index.html)
 """
 from __future__ import annotations
 
@@ -25,10 +26,10 @@ NY = ZoneInfo("America/New_York")
 SG = ZoneInfo("Asia/Singapore")
 CLOSE_CUTOFF = time(16, 15)      # bars dated today are used only after this ET time
 MA_WINDOW = 5
-BOTTOM_LEVEL = 1.2
+BOTTOM_LEVEL = 1.2               # fallback values written to data.json (chart uses per-basket levels)
 TOP_LEVEL = 0.8
-BOTTOM_PCT = 0.90   # MA in its top 10% of the past year -> potential bottom
-TOP_PCT = 0.10      # MA in its bottom 10%               -> potential top
+BOTTOM_PCT = 0.90                # MA in its top 10% of the past year -> potential bottom
+TOP_PCT = 0.10                   # MA in its bottom 10%               -> potential top
 MIN_COVERAGE = 0.70              # min share of basket with valid data on a day
 DISPLAY_DAYS = 126               # ~6 months shown
 DOWNLOAD_PERIOD = "1y"
@@ -128,6 +129,10 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, basket: list[str]) -> pd.Dat
     lo = min(out["ma"].quantile(TOP_PCT), 0.95)
     out.attrs["levels"] = {"bottom": round(float(hi), 2), "top": round(float(lo), 2)}
     state = np.where(out["ma"] >= hi, 1, np.where(out["ma"] <= lo, -1, 0))
+    state = pd.Series(state, index=out.index).where(out["ma"].notna(), 0)
+    out["state"] = state
+    out["entry"] = (state != state.shift()) & (state != 0)
+    return out
 
 
 # ----------------------------------------------------------------- OUTPUT
@@ -154,7 +159,7 @@ def build() -> None:
         price = price.reindex(df.index).ffill()
         if price.notna().any():
             price = price / price.dropna().iloc[0] * 100
-        last = df.dropna(subset=["ma"]).iloc[-1]
+        last = df.iloc[-1]   # the latest completed day, even if its MA is blank
 
         panels.append({
             "name": p["name"],
@@ -162,7 +167,7 @@ def build() -> None:
             "levels": df.attrs["levels"],
             "last": {
                 "trin": None if pd.isna(last["trin"]) else round(float(last["trin"]), 2),
-                "ma": round(float(last["ma"]), 2),
+                "ma": None if pd.isna(last["ma"]) else round(float(last["ma"]), 2),
                 "adv": int(last["adv"]),
                 "dec": int(last["dec"]),
                 "state": int(last["state"]),
