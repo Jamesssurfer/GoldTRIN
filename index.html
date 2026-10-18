@@ -71,7 +71,7 @@ function card(p){
 function chart(p, params, host){
   const s = p.series;
   const maxMa = Math.max(...s.ma.filter(v => v != null), 0);
-  const top = Math.max(2, maxMa * 1.2);
+  const top = 2.5;
 
   const pick = sig => {
     const x = [], y = [];
@@ -83,10 +83,10 @@ function chart(p, params, host){
   const traces = [
     {x:s.dates, y:s.price, name:"Price (idx 100)", yaxis:"y2",
      line:{color:"#cbd5e1", width:1.5}, hovertemplate:"%{y:.1f}"},
-    {x:s.dates, y:s.trin, name:"TRIN (daily)",
-     line:{color:"#94a3b8", width:1}, hovertemplate:"%{y:.2f}"},
-    {x:s.dates, y:s.ma, name:`TRIN ${params.ma}d MA`,
-     line:{color:COLORS.amber, width:2.5}, hovertemplate:"%{y:.2f}"},
+    {x:s.dates, y:s.trin, name:"TRIN (daily)", mode:"markers",
+     marker:{color:"#94a3b8", size:4, opacity:.55}, hovertemplate:"%{y:.2f}"},
+    {x:s.dates, y:s.ma, name:`TRIN ${params.ma}d MA`, connectgaps:true,
+     line:{color:COLORS.amber, width:3}, hovertemplate:"%{y:.2f}"},
     {x:bottoms.x, y:bottoms.y, mode:"markers", name:"Potential bottom", hoverinfo:"skip",
      marker:{symbol:"triangle-up", size:13, color:COLORS.green, line:{color:"#fff", width:1}}},
     {x:tops.x, y:tops.y, mode:"markers", name:"Potential top", hoverinfo:"skip",
