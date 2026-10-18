@@ -127,7 +127,7 @@ function chart(p, params, host){
 async function main(){
   const sub = document.getElementById("sub");
   try{
-    const res = await fetch("data.json?t=" + Date.now(), {cache:"no-store"});
+    const res = await fetch("docs/data.json?t=" + Date.now(), {cache:"no-store"});
     if (!res.ok) throw new Error(`data.json returned HTTP ${res.status}`);
     const d = await res.json();
 
